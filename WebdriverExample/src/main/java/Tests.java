@@ -1,8 +1,15 @@
 import org.junit.Assert;
 import org.junit.Test;
-import org.openqa.selenium.By;
-import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.*;
 import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.interactions.Actions;
+import org.openqa.selenium.support.ui.ExpectedCondition;
+import org.openqa.selenium.support.ui.SystemClock;
+import org.openqa.selenium.support.ui.WebDriverWait;
+
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Created by Captain Osmant on 16.11.2016.
@@ -11,11 +18,14 @@ public class Tests{
 
     public static WebDriver getBrowser(){
 
-        System.setProperty("webdriver.gecko.driver","./src/main/resources/geckodriver.exe");
-        WebDriver br = new FirefoxDriver();
+
         if(browser==null){
+            System.setProperty("webdriver.gecko.driver","./src/main/resources/geckodriver.exe");
+            WebDriver br = new FirefoxDriver();
             browser = br;
+
         }
+        browser.manage().timeouts().implicitlyWait(1000, TimeUnit.MILLISECONDS);
         return browser;
     }
 
@@ -44,8 +54,130 @@ public class Tests{
             sleep(1000);
             return;
         }
-        sleep(1000);
+        sleep(2000);
         return;
+    }
+
+    public static void rightClick(String cssSelector, WebDriver driver){
+        sleep(200);
+        String JS = "var event = new Event('contextmenu'); setTimeout(function(){ _.$(\""+cssSelector+"\")[0].dispatchEvent(event);}, 100)";
+        System.out.println(JS);
+        JavascriptExecutor executor = (JavascriptExecutor) driver;
+        executor.executeScript(JS);
+        sleep(200);
+    }
+
+    public static void rightClick(String cssSelector){
+        rightClick(cssSelector, browser);
+    }
+
+    public static void removeIfExists(String filename){
+        Integer size = browser.findElements(By.cssSelector("[data-addr='"+filename+"']")).size();
+        if(size==0){
+            return;
+        }
+        rightClick("[data-addr='"+filename+"']");
+        browser.findElement(By.cssSelector(".contextmenu .delete")).click();
+        sleep(1000);
+    }
+
+    public static WebElement getElement (final By by){
+        return (new WebDriverWait(browser, 3)).until(new ExpectedCondition<WebElement>() {
+            @Override
+            public WebElement apply(WebDriver webDriver) {
+                return browser.findElement(by);
+            }
+        });
+    }
+    @Test
+    public void testOneCanCopyFile(){
+        getBrowser();
+        auth(browser);
+
+        browser.get("http://at.retarcorp.com/core/file_manager/");
+        getElement(By.cssSelector("[data-addr='/files']")).click();
+        rightClick("[data-addr='/files/file-to-copy.txt']", browser);
+        sleep(1000);
+
+        getElement(By.cssSelector(".contextmenu .copy")).click();
+        getElement(By.cssSelector("aside [data-addr='/test']")).click();
+        sleep(1000);
+
+        removeIfExists("/test/file-to-copy.txt");
+        getElement(By.id("paste")).click();
+
+        sleep(1000);
+        int resultingSize= browser.findElements(By.cssSelector("[data-addr='/test/file-to-copy.txt']")).size();
+        Assert.assertEquals(resultingSize, 1);
+
+    }
+
+    @Test
+    public void testOneCanEditFile(){
+        getBrowser();
+        auth(browser);
+
+        browser.get("http://at.retarcorp.com/core/file_manager/");
+
+
+        getElement(By.cssSelector("[data-addr='/test']")).click();
+        getElement(By.cssSelector("[data-addr='/test/file.txt']")).click();
+        String textToUse = "HcYFDlwOXIfkSlfm";
+        WebElement textarea = getElement(By.id("editor-content"));
+
+        textarea.clear();
+        textarea.sendKeys(textToUse);
+        textarea.sendKeys(Keys.CONTROL, "S");
+
+        // Delay to let AJAX save file contents
+        sleep(1000);
+
+        WebElement statusSpan = getElement(By.cssSelector("form.editor span.status"));
+        String statusText = statusSpan.getText();
+
+        Pattern pattern = Pattern.compile("^[\\D]*([\\d]+)\\s.*");
+        Matcher m = pattern.matcher(statusText);
+
+        Integer receivedSize=0, savedSize=0;
+
+        while(m.find()){
+            String value = m.group(1);
+            savedSize = Integer.parseInt(value);
+        }
+
+        textarea.sendKeys(Keys.ESCAPE);
+        rightClick("[data-addr='/test/file.txt']", browser);
+        getElement(By.className("properties")).click();
+
+        String propertyText = getElement(By.cssSelector(".popover h5:nth-child(3)")).getText();
+        m = pattern.matcher(propertyText);
+
+        while(m.find()){
+            String value = m.group(1);
+            receivedSize = Integer.parseInt(value);
+
+        }
+        Assert.assertEquals(receivedSize, savedSize);
+    }
+
+
+    @Test
+    public void testOneCanNavigateFiles(){
+        getBrowser();
+        auth(browser);
+
+        getElement(By.className("i_file_manager")).click();
+        getElement(By.cssSelector("[data-addr='/core'].folder")).click();
+        getElement(By.cssSelector("[data-addr='/core/file_manager'].folder")).click();
+        getElement(By.cssSelector("[data-addr='/core/file_manager/test'].folder")).click();
+        getElement(By.cssSelector("[data-addr='/core/file_manager/test/acx.txt']")).click();
+
+        // Delaying to let AJAX load required file content;
+        sleep(1000);
+        String deFactoText = getElement(By.id("editor-content")).getText();
+        String expectedText = "Hello, world!";
+
+        Assert.assertEquals(deFactoText.equals(expectedText), true);
     }
 
     @Test
@@ -53,13 +185,13 @@ public class Tests{
         getBrowser();
         auth(browser);
 
-        browser.findElement(By.className("i_blog")).click();
-        sleep(2000);
+        getElement(By.className("i_blog")).click();
         int count, resCount;
         count = browser.findElements(By.className("item")).size();
-        browser.findElement(By.id("add")).click();
+        getElement(By.id("add")).click();
 
-        sleep(2000);
+        // AJAX delay
+        sleep(1000);
         resCount = browser.findElements(By.className("item")).size();
 
         Assert.assertEquals(resCount - count, 1);
@@ -75,25 +207,51 @@ public class Tests{
         String path="http://at.retarcorp.com/core/adm/blog/";
         browser.get(path);
 
-        browser.findElements(By.className("item")).get(0).click();
-
-        sleep(1500);
+        getElement(By.className("item")).click();
 
         String text = "Edited at timestamp "+System.currentTimeMillis();
-        browser.findElement(By.id("title")).clear();
-        browser.findElement(By.id("title")).sendKeys(text);
+        getElement(By.id("title")).clear();
+        getElement(By.id("title")).sendKeys(text);
 
 
-        browser.findElement(By.id("save")).click();
-        sleep(1500);
+        getElement(By.id("save")).click();
+        sleep(2000);
 
         browser.findElements(By.className("item")).get(0).click();
-        sleep(1500);
-        String newText = browser.findElement(By.id("title")).getAttribute("value");
+
+
+
+        String newText = getElement(By.id("title")).getAttribute("value");
         Assert.assertEquals(newText, text);
 
 
     }
+
+    static String MYSQL_EXPECTED_RESULT = "15";
+    @Test
+    public void testOneCanExecMySQLRequest(){
+        getBrowser();
+        auth(browser);
+        browser.get("http://at.retarcorp.com/core/mysql/");
+
+        WebElement li = getElement(By.cssSelector(".query_list li:first-child"));
+        li.click();
+
+        WebElement listText = getElement(By.cssSelector(".query_list li:first-child xmp"));
+        String queryExpected = listText.getText();
+
+        String queryGot = getElement(By.id("query")).getAttribute("value");
+        Assert.assertEquals(queryExpected.equals(queryGot), true);
+
+        getElement(By.id("execute")).click();
+        String receivedResult = getElement(By.cssSelector("section.content tbody tr:first-child td:first-child xmp")).getText();
+
+        Assert.assertEquals(receivedResult.equals(MYSQL_EXPECTED_RESULT), true);
+
+    }
+
+
+
     private static void sleep(int millis){
         try{
             Thread.sleep(millis);
